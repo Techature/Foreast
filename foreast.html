@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Foreast</title>
+<style>
+  :root{
+    --light-green:#e8f5e0;
+    --mid-green:#8fc98f;
+    --dark-green:#2e5f3e;
+    --deep-green:#1f4630;
+    --magenta:#b3123f;
+    --magenta-dark:#7e0c2c;
+    --heart-green:#3fae5c;
+    --cream:#fbfaf3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    background:radial-gradient(circle at 50% 0%, var(--light-green), #cfe8c4 70%);
+    font-family:'Trebuchet MS', 'Segoe UI', sans-serif;
+    color:var(--deep-green);
+    padding:20px 10px 40px;
+  }
+  h1{
+    margin:6px 0 2px;
+    font-size:2rem;
+    letter-spacing:1px;
+    color:var(--dark-green);
+    text-shadow:1px 1px 0 #fff;
+  }
+  p.desc{
+    margin:0 0 16px;
+    font-style:italic;
+    color:#3f6b4a;
+    text-align:center;
+    max-width:520px;
+  }
+  .hud{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    width:700px;
+    max-width:94vw;
+    margin-bottom:8px;
+    font-weight:bold;
+  }
+  .lives{
+    display:flex;
+    gap:6px;
+    align-items:center;
+  }
+  .life-icon{
+    width:22px;height:22px;
+  }
+  .stage{
+    width:700px;
+    max-width:94vw;
+    overflow:hidden;
+    border-radius:22px;
+    box-shadow:0 10px 30px rgba(31,70,48,0.25);
+    background:var(--cream);
+    border:4px solid var(--dark-green);
+  }
+  .track{
+    display:flex;
+    width:200%;
+    transition:transform 0.9s cubic-bezier(.6,-0.1,.3,1.2);
+  }
+  .panel{
+    width:50%;
+    flex-shrink:0;
+    position:relative;
+  }
+  canvas{
+    display:block;
+    width:100%;
+    height:auto;
+    cursor:crosshair;
+    touch-action:none;
+    background:linear-gradient(180deg,#eef8e6,#e2f2d8);
+  }
+  .message-view{
+    height:100%;
+    min-height:460px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:30px;
+    gap:16px;
+    background:linear-gradient(180deg,#fff7f0,#fdeef0);
+  }
+  .message-view.win{
+    background:linear-gradient(180deg,#f0fff2,#e3f8e6);
+  }
+  .message-view h2{
+    margin:0;
+    font-size:1.5rem;
+    color:var(--magenta-dark);
+  }
+  .message-view.win h2{
+    color:var(--dark-green);
+  }
+  .message-view p{
+    max-width:380px;
+    line-height:1.5;
+    color:#4a3a3f;
+  }
+  button{
+    font-family:inherit;
+    font-size:1rem;
+    padding:10px 22px;
+    border-radius:30px;
+    border:none;
+    background:var(--dark-green);
+    color:#fff;
+    cursor:pointer;
+    box-shadow:0 4px 0 var(--deep-green);
+    transition:transform .1s;
+  }
+  button:active{
+    transform:translateY(3px);
+    box-shadow:0 1px 0 var(--deep-green);
+  }
+  .hint{
+    font-size:0.85rem;
+    color:#6a8a72;
+    margin-top:10px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Foreast: Be careful!</h1>
+<p class="desc">This is a nature pathway, but don't get thorns on your body!</p>
+
+<div class="hud">
+  <div class="lives" id="livesBox"></div>
+  <div id="statusText">Hold and drag the heart along the trail 🌿</div>
+</div>
+
+<div class="stage">
+  <div class="track" id="track">
+    <div class="panel">
+      <canvas id="game" width="700" height="460"></canvas>
+    </div>
+    <div class="panel">
+      <div class="message-view" id="messageView">
+        <h2 id="msgTitle"></h2>
+        <p id="msgBody"></p>
+        <button id="restartBtn">Play Again</button>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="hint">Tip: press and hold your mouse (or finger) on the heart, then drag along the green path.</p>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const track = document.getElementById('track');
+  const messageView = document.getElementById('messageView');
+  const msgTitle = document.getElementById('msgTitle');
+  const msgBody = document.getElementById('msgBody');
+  const livesBox = document.getElementById('livesBox');
+  const statusText = document.getElementById('statusText');
+  const restartBtn = document.getElementById('restartBtn');
+
+  // ---------- Path definition ----------
+  const waypoints = [
+    [50,410],[50,280],[220,280],[220,410],
+    [390,410],[390,140],[560,140],[560,380],
+    [650,380],[650,50]
+  ];
+  const corridorWidth = 56;
+
+  function segLength(a,b){ return Math.hypot(b[0]-a[0], b[1]-a[1]); }
+  const segLengths = [];
+  let totalLen = 0;
+  for(let i=0;i<waypoints.length-1;i++){
+    const l = segLength(waypoints[i], waypoints[i+1]);
+    segLengths.push(l);
+    totalLen += l;
+  }
+
+  function pointAtDistance(d){
+    d = Math.max(0, Math.min(totalLen, d));
+    let acc = 0;
+    for(let i=0;i<segLengths.length;i++){
+      if(d <= acc + segLengths[i] || i === segLengths.length-1){
+        const t = segLengths[i] === 0 ? 0 : (d-acc)/segLengths[i];
+        const a = waypoints[i], b = waypoints[i+1];
+        const x = a[0] + (b[0]-a[0])*t;
+        const y = a[1] + (b[1]-a[1])*t;
+        const dx = b[0]-a[0], dy = b[1]-a[1];
+        const len = Math.hypot(dx,dy) || 1;
+        return {x, y, nx: -dy/len, ny: dx/len};
+      }
+      acc += segLengths[i];
+    }
+    const last = waypoints[waypoints.length-1];
+    return {x:last[0], y:last[1], nx:0, ny:1};
+  }
+
+  // dense sample for grass exclusion
+  const densePath = [];
+  for(let d=0; d<=totalLen; d+=6){ densePath.push(pointAtDistance(d)); }
+
+  function distToPath(px,py){
+    let min = Infinity;
+    for(const p of densePath){
+      const dd = Math.hypot(p.x-px, p.y-py);
+      if(dd<min) min = dd;
+    }
+    return min;
+  }
+
+  // ---------- Mountains (pathway markers that slow you down) ----------
+  const mountains = [];
+  {
+    const step = 70;
+    let sign = 1;
+    for(let d=50; d<totalLen-40; d+=step){
+      const p = pointAtDistance(d);
+      const offset = 6*sign;
+      mountains.push({x:p.x+p.nx*offset, y:p.y+p.ny*offset, size:16});
+      sign *= -1;
+    }
+  }
+
+  // ---------- Bushes (obstacles, cost a life) ----------
+  const bushes = [];
+  {
+    const bushDistances = [130,260,400,560,700,840,980];
+    bushDistances.forEach((d,i)=>{
+      if(d > totalLen-30) return;
+      const p = pointAtDistance(d);
+      const side = i%2===0 ? 1 : -1;
+      const offset = 17*side;
+      bushes.push({x:p.x+p.nx*offset, y:p.y+p.ny*offset, size:13});
+    });
+  }
+
+  // ---------- Grass tufts (decorative, outside corridor) ----------
+  const grassTufts = [];
+  for(let i=0;i<160;i++){
+    const x = Math.random()*W;
+    const y = Math.random()*H;
+    if(distToPath(x,y) > corridorWidth/2 + 14){
+      grassTufts.push({x,y, len: 6+Math.random()*7, angle: (Math.random()-0.5)*0.9, wob: Math.random()*Math.PI*2});
+    }
+  }
+
+  const startPoint = {x:waypoints[0][0], y:waypoints[0][1]};
+  const goalPoint = {x:waypoints[waypoints.length-1][0], y:waypoints[waypoints.length-1][1]};
+
+  // ---------- Game state ----------
+  let lives = 2;
+  let heart = {x:startPoint.x, y:startPoint.y};
+  let isDrawing = false;
+  let mouse = {x:startPoint.x, y:startPoint.y};
+  let invincibleUntil = 0;
+  let gameOver = false;
+  let particles = [];
+  let time = 0;
+  let trail = [];
+
+  function resetGame(){
+    lives = 2;
+    heart = {x:startPoint.x, y:startPoint.y};
+    isDrawing = false;
+    invincibleUntil = 0;
+    gameOver = false;
+    particles = [];
+    trail = [];
+    statusText.textContent = "Hold and drag the heart along the trail 🌿";
+    track.style.transform = 'translateX(0%)';
+    renderLives();
+  }
+
+  function renderLives(){
+    livesBox.innerHTML = '';
+    for(let i=0;i<2;i++){
+      const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      svg.setAttribute('viewBox','0 0 32 29');
+      svg.classList.add('life-icon');
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d','M16 28 C6 20 0 14 0 8 C0 3 4 0 8 0 C11 0 14 2 16 5 C18 2 21 0 24 0 C28 0 32 3 32 8 C32 14 26 20 16 28 Z');
+      path.setAttribute('fill', i < lives ? '#3fae5c' : '#d9d9d9');
+      svg.appendChild(path);
+      livesBox.appendChild(svg);
+    }
+  }
+  renderLives();
+
+  // ---------- Particles ----------
+  function spawnParticles(x,y,color,count){
+    for(let i=0;i<count;i++){
+      const angle = Math.random()*Math.PI*2;
+      const speed = 1+Math.random()*3;
+      particles.push({
+        x,y,
+        vx:Math.cos(angle)*speed,
+        vy:Math.sin(angle)*speed,
+        alpha:1,
+        color,
+        size:2+Math.random()*3
+      });
+    }
+  }
+  function updateParticles(){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vy += 0.02;
+      p.alpha -= 0.015;
+      if(p.alpha<=0) particles.splice(i,1);
+    }
+  }
+  function drawParticles(){
+    for(const p of particles){
+      ctx.globalAlpha = Math.max(p.alpha,0);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- Drawing helpers ----------
+  function drawGrass(){
+    ctx.strokeStyle = 'rgba(90,150,80,0.55)';
+    ctx.lineWidth = 2;
+    for(const g of grassTufts){
+      const wob = Math.sin(time*0.002 + g.wob)*3;
+      ctx.beginPath();
+      ctx.moveTo(g.x, g.y);
+      ctx.quadraticCurveTo(
+        g.x + Math.sin(g.angle)*g.len*0.5 + wob*0.3, g.y - g.len*0.6,
+        g.x + Math.sin(g.angle)*g.len + wob, g.y - g.len
+      );
+      ctx.stroke();
+    }
+  }
+
+  function drawCorridor(){
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // outline (solid dark green, slightly wider)
+    ctx.beginPath();
+    ctx.moveTo(waypoints[0][0], waypoints[0][1]);
+    for(let i=1;i<waypoints.length;i++) ctx.lineTo(waypoints[i][0], waypoints[i][1]);
+    ctx.strokeStyle = '#2e5f3e';
+    ctx.lineWidth = corridorWidth + 6;
+    ctx.stroke();
+    // transparent fill on top
+    ctx.strokeStyle = 'rgba(46,95,62,0.18)';
+    ctx.lineWidth = corridorWidth;
+    ctx.stroke();
+  }
+
+  function drawMountain(m){
+    ctx.save();
+    ctx.translate(m.x, m.y);
+    const s = m.size;
+    ctx.beginPath();
+    ctx.moveTo(0,-s);
+    ctx.quadraticCurveTo(s*0.55,-s*0.05, s*0.85, s*0.55);
+    ctx.quadraticCurveTo(0, s*0.35, -s*0.85, s*0.55);
+    ctx.quadraticCurveTo(-s*0.55,-s*0.05, 0,-s);
+    ctx.closePath();
+    ctx.fillStyle = '#1f4630';
+    ctx.fill();
+    ctx.strokeStyle = '#153322';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawBush(b){
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    const spikes = 7;
+    ctx.beginPath();
+    for(let i=0;i<spikes*2;i++){
+      const r = i%2===0 ? b.size : b.size*0.45;
+      const ang = (Math.PI*2*i)/(spikes*2);
+      const px = Math.cos(ang)*r, py = Math.sin(ang)*r;
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#b3123f';
+    ctx.fill();
+    ctx.strokeStyle = '#7e0c2c';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawGoal(){
+    const pulse = 4*Math.sin(time*0.006);
+    ctx.beginPath();
+    ctx.arc(goalPoint.x, goalPoint.y, 16+pulse, 0, Math.PI*2);
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(212,175,55,0.25)';
+    ctx.fill();
+  }
+
+  function drawHeart(x,y,scale,flash){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.scale(scale,scale);
+    ctx.beginPath();
+    ctx.moveTo(0,4);
+    ctx.bezierCurveTo(-2,-2, -12,-2, -12,-9);
+    ctx.bezierCurveTo(-12,-16, -3,-18, 0,-11);
+    ctx.bezierCurveTo(3,-18, 12,-16, 12,-9);
+    ctx.bezierCurveTo(12,-2, 2,-2, 0,4);
+    ctx.closePath();
+    ctx.fillStyle = flash ? '#ffffff' : '#3fae5c';
+    ctx.fill();
+    ctx.strokeStyle = '#256b3a';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- Main loop ----------
+  let currentSpeed = 3.4;
+  const normalSpeed = 3.4;
+  const slowSpeed = 1.1;
+
+  function step(){
+    time += 16;
+    if(!gameOver){
+      // determine slow state
+      let slowed = false;
+      for(const m of mountains){
+        if(Math.hypot(heart.x-m.x, heart.y-m.y) < m.size*0.9 + 10){ slowed = true; break; }
+      }
+      const targetSpeed = slowed ? slowSpeed : normalSpeed;
+      currentSpeed += (targetSpeed - currentSpeed) * 0.15;
+
+      if(isDrawing){
+        const dx = mouse.x - heart.x, dy = mouse.y - heart.y;
+        const dist = Math.hypot(dx,dy);
+        if(dist > 1){
+          const mv = Math.min(currentSpeed, dist);
+          const nx = heart.x + dx/dist*mv;
+          const ny = heart.y + dy/dist*mv;
+          const limit = corridorWidth/2 - 2; // small margin so heart doesn't clip the outline
+          if(distToPath(nx, ny) <= limit){
+            heart.x = nx;
+            heart.y = ny;
+            trail.push({x:heart.x, y:heart.y, life:1});
+          } else {
+            // try sliding along the corridor: attempt x-only and y-only moves
+            if(distToPath(nx, heart.y) <= limit){
+              heart.x = nx;
+              trail.push({x:heart.x, y:heart.y, life:1});
+            } else if(distToPath(heart.x, ny) <= limit){
+              heart.y = ny;
+              trail.push({x:heart.x, y:heart.y, life:1});
+            }
+          }
+        }
+      }
+
+      // bush collisions
+      if(time > invincibleUntil){
+        for(const b of bushes){
+          if(Math.hypot(heart.x-b.x, heart.y-b.y) < b.size*0.9 + 9){
+            lives -= 1;
+            renderLives();
+            spawnParticles(heart.x, heart.y, '#b3123f', 14);
+            invincibleUntil = time + 900;
+            if(lives <= 0){
+              triggerLose();
+            }
+            break;
+          }
+        }
+      }
+
+      // win check
+      if(!gameOver && Math.hypot(heart.x-goalPoint.x, heart.y-goalPoint.y) < 20){
+        triggerWin();
+      }
+    }
+
+    // trail fade
+    for(let i=trail.length-1;i>=0;i--){
+      trail[i].life -= 0.02;
+      if(trail[i].life<=0) trail.splice(i,1);
+    }
+
+    updateParticles();
+    draw();
+    requestAnimationFrame(step);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    drawGrass();
+    drawCorridor();
+    for(const m of mountains) drawMountain(m);
+    for(const b of bushes) drawBush(b);
+    drawGoal();
+
+    // trail
+    ctx.lineCap = 'round';
+    for(const t of trail){
+      ctx.globalAlpha = Math.max(t.life*0.4,0);
+      ctx.fillStyle = '#3fae5c';
+      ctx.beginPath();
+      ctx.arc(t.x,t.y,3,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const flashing = time < invincibleUntil && Math.floor(time/100)%2===0;
+    const pulseScale = 1 + 0.06*Math.sin(time*0.008);
+    drawHeart(heart.x, heart.y, pulseScale, flashing);
+
+    drawParticles();
+  }
+
+  function triggerLose(){
+    gameOver = true;
+    isDrawing = false;
+    spawnParticles(heart.x, heart.y, '#b3123f', 30);
+    statusText.textContent = "Oh no!";
+    messageView.classList.remove('win');
+    msgTitle.textContent = "It's okay!";
+    msgBody.textContent = "Take a screenshot of the maze and print it out. Sometimes, just working on paper can work well!";
+    setTimeout(()=>{ track.style.transform = 'translateX(-50%)'; }, 250);
+  }
+
+  function triggerWin(){
+    gameOver = true;
+    isDrawing = false;
+    spawnParticles(heart.x, heart.y, '#d4af37', 10);
+    spawnParticles(heart.x, heart.y, '#3fae5c', 20);
+    statusText.textContent = "You made it!";
+    messageView.classList.add('win');
+    msgTitle.textContent = "Hooray, you crossed the Foreast!";
+    msgBody.textContent = "Your heart found its way through the mountains and dodged every thorny bush. Well done, explorer!";
+    setTimeout(()=>{ track.style.transform = 'translateX(-50%)'; }, 250);
+  }
+
+  // ---------- Input ----------
+  function getPos(evt){
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W/rect.width, scaleY = H/rect.height;
+    const cx = (evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left;
+    const cy = (evt.touches ? evt.touches[0].clientY : evt.clientY) - rect.top;
+    return {x:cx*scaleX, y:cy*scaleY};
+  }
+  canvas.addEventListener('mousedown', e=>{ isDrawing = true; mouse = getPos(e); });
+  window.addEventListener('mouseup', ()=>{ isDrawing = false; });
+  canvas.addEventListener('mousemove', e=>{ if(isDrawing) mouse = getPos(e); });
+  canvas.addEventListener('touchstart', e=>{ isDrawing = true; mouse = getPos(e); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchmove', e=>{ if(isDrawing) mouse = getPos(e); e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchend', ()=>{ isDrawing = false; });
+
+  restartBtn.addEventListener('click', resetGame);
+
+  requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>
